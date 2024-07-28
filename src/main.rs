@@ -185,20 +185,15 @@ impl DnsQuestion {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        let mut enc: Vec<String> = self
-            .name
-            .split('.')
-            .map(|s| format!("\\x{:02x}{}", s.len(), s))
-            .collect();
-
-        enc.push("\\x00".to_string());
-
         let mut bytes: Vec<u8> = Vec::new();
 
-        let binding = enc.join("");
-        let name = binding.as_bytes();
-
-        bytes.extend_from_slice(name);
+        // Encode the name
+        for label in self.name.split('.') {
+            bytes.push(label.len() as u8);
+            bytes.extend_from_slice(label.as_bytes());
+        }
+        // Null byte to terminate the domain name
+        bytes.push(0);
 
         // Encode `qtype` (2 bytes)
         let qtype = self.qtype.to_u16();
