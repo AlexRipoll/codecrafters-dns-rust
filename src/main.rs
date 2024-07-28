@@ -4,6 +4,11 @@ fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
+    let header = DnsHeader::new();
+    let question = DnsQuestion::new("codecrafters.io".to_string(), QueryType::A, Class::IN);
+
+    let mut dns = Dns::new(header, question);
+
     // Uncomment this block to pass the first stage
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
@@ -13,8 +18,9 @@ fn main() {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
 
-                let header = DnsHeader::new();
-                let response = header.to_bytes();
+                dns.header.set_qcount(1);
+                let response = dns.response();
+
                 println!("{:?}", response);
 
                 udp_socket
@@ -26,6 +32,27 @@ fn main() {
                 break;
             }
         }
+    }
+}
+
+#[derive(Debug)]
+struct Dns {
+    header: DnsHeader,
+    question: DnsQuestion,
+}
+
+impl Dns {
+    fn new(header: DnsHeader, question: DnsQuestion) -> Self {
+        Self { header, question }
+    }
+
+    fn response(&self) -> Vec<u8> {
+        let mut response = Vec::new();
+
+        response.extend_from_slice(&self.header.to_bytes());
+        response.extend_from_slice(&self.question.to_bytes());
+
+        response
     }
 }
 
@@ -65,6 +92,10 @@ impl DnsHeader {
         }
     }
 
+    fn set_qcount(&mut self, count: u16) {
+        self.question_count = count;
+    }
+
     fn to_bytes(&self) -> [u8; 12] {
         let mut bytes = [0u8; 12];
 
@@ -95,7 +126,89 @@ impl DnsHeader {
 
         // Serialize `additional_count` (16 bits)
         bytes[10] = (self.additional_count >> 8) as u8;
-        bytes[11] = self.additional_count.to_be() as u8;
+        bytes[11] = self.additional_count as u8;
+
+        bytes
+    }
+}
+
+#[derive(Debug)]
+struct DnsQuestion {
+    name: String,
+    qtype: QueryType,
+    class: Class,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum QueryType {
+    A = 1,
+    NS = 2,
+    MD = 3,
+    MF = 4,
+    CNAME = 5,
+    SOA = 6,
+    MB = 7,
+    MG = 8,
+    MR = 9,
+    NULL = 10,
+    WKS = 11,
+    PTR = 12,
+    HINFO = 13,
+    MINFO = 14,
+    MX = 15,
+    TXT = 16,
+}
+
+impl QueryType {
+    fn to_u16(self) -> u16 {
+        self as u16
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Class {
+    IN = 1,
+    CS = 2,
+    CH = 3,
+    HS = 4,
+}
+
+impl Class {
+    fn to_u16(self) -> u16 {
+        self as u16
+    }
+}
+
+impl DnsQuestion {
+    fn new(name: String, qtype: QueryType, class: Class) -> Self {
+        Self { name, qtype, class }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut enc: Vec<String> = self
+            .name
+            .split('.')
+            .map(|s| format!("\\x{:02x}{}", s.len(), s))
+            .collect();
+
+        enc.push("\\x00".to_string());
+
+        let mut bytes: Vec<u8> = Vec::new();
+
+        let binding = enc.join("");
+        let name = binding.as_bytes();
+
+        bytes.extend_from_slice(name);
+
+        // Encode `qtype` (2 bytes)
+        let qtype = self.qtype.to_u16();
+        bytes.push((qtype >> 8) as u8);
+        bytes.push(qtype as u8);
+
+        // Encode `class` (2 bytes)
+        let class = self.class.to_u16();
+        bytes.push((class >> 8) as u8);
+        bytes.push(class as u8);
 
         bytes
     }
