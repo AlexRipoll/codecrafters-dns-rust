@@ -19,6 +19,7 @@ fn main() {
                 println!("Received {} bytes from {}", size, source);
 
                 dns.header.set_qcount(1);
+
                 let response = dns.response();
 
                 println!("{:?}", response);
@@ -94,6 +95,10 @@ impl DnsHeader {
 
     fn set_qcount(&mut self, count: u16) {
         self.question_count = count;
+    }
+
+    fn set_ancount(&mut self, count: u16) {
+        self.answer_count = count;
     }
 
     fn to_bytes(&self) -> [u8; 12] {
@@ -204,6 +209,73 @@ impl DnsQuestion {
         let class = self.class.to_u16();
         bytes.push((class >> 8) as u8);
         bytes.push(class as u8);
+
+        bytes
+    }
+}
+
+#[derive(Debug)]
+struct DnsAnswer {
+    name: String,
+    qtype: QueryType,
+    class: Class,
+    ttl: u32,
+    rdlength: u16,
+    rdata: Vec<u8>,
+}
+
+impl DnsAnswer {
+    fn new(
+        name: String,
+        qtype: QueryType,
+        class: Class,
+        ttl: u32,
+        rdlength: u16,
+        rdata: Vec<u8>,
+    ) -> Self {
+        Self {
+            name,
+            qtype,
+            class,
+            ttl,
+            rdlength,
+            rdata,
+        }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+
+        // Encode the name
+        for label in self.name.split('.') {
+            bytes.push(label.len() as u8);
+            bytes.extend_from_slice(label.as_bytes());
+        }
+        // Null byte to terminate the domain name
+        bytes.push(0);
+
+        // Encode `qtype` (2 bytes)
+        let qtype = self.qtype.to_u16();
+        bytes.push((qtype >> 8) as u8);
+        bytes.push(qtype as u8);
+
+        // Encode `class` (2 bytes)
+        let class = self.class.to_u16();
+        bytes.push((class >> 8) as u8);
+        bytes.push(class as u8);
+
+        // Encode `ttl` (4 bytes)
+        bytes.push((self.ttl >> 24) as u8);
+        bytes.push((self.ttl >> 16) as u8);
+        bytes.push((self.ttl >> 8) as u8);
+        bytes.push(self.ttl as u8);
+
+        // Encode `length` (2 bytes)
+        bytes.push((self.rdlength >> 8) as u8);
+        bytes.push(self.rdlength as u8);
+
+        // Encode `data` (rdlength bytes)
+        bytes.extend_from_slice(&self.rdata);
 
         bytes
     }
