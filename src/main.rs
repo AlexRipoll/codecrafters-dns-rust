@@ -50,7 +50,7 @@ impl DnsHeader {
     fn new() -> Self {
         Self {
             id: 1234,
-            query_response: false,
+            query_response: true,
             opcode: 0,
             authoritative_answer: false,
             truncated_msg: false,
@@ -61,7 +61,7 @@ impl DnsHeader {
             question_count: 0,
             answer_count: 0,
             authority_count: 0,
-            additional_count: 4228,
+            additional_count: 0,
         }
     }
 
