@@ -15,12 +15,22 @@ fn main() {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
 
-                header = header.id(1234).query_response(true).build();
+                let mut header_data = [0u8; 12];
+                header_data.copy_from_slice(&buf[0..12]);
+                let packet_header = Header::from_bytes(header_data);
+
+                header = header
+                    .id(packet_header.id)
+                    .query_response(true)
+                    .opcode(packet_header.opcode)
+                    .recursion_desired(packet_header.recursion_desired)
+                    .response_code(if packet_header.opcode == 0 { 0 } else { 4 })
+                    .build();
 
                 let question =
                     Question::new("codecrafters.io".to_string(), QueryType::A, Class::IN);
 
-                let mut dns = Dns::new(header, question);
+                let mut dns = Dns::new(header.build(), question);
                 dns.header.inc_qcount();
 
                 dns.add_resource_record(
@@ -34,8 +44,6 @@ fn main() {
                 dns.header.inc_ancount();
 
                 let response = dns.response();
-
-                println!("{:?}", response);
 
                 udp_socket
                     .send_to(&response, source)
