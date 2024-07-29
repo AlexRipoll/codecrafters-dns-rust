@@ -8,17 +8,20 @@ fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
 
+    let mut header = Header::default();
+
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
 
-                let header = DnsHeader::new();
+                header = header.id(1234).query_response(true).build();
+
                 let question =
-                    DnsQuestion::new("codecrafters.io".to_string(), QueryType::A, Class::IN);
+                    Question::new("codecrafters.io".to_string(), QueryType::A, Class::IN);
 
                 let mut dns = Dns::new(header, question);
-                dns.header.set_qcount(1);
+                dns.header.inc_qcount();
 
                 dns.add_resource_record(
                     "codecrafters.io".to_string(),
@@ -28,7 +31,7 @@ fn main() {
                     4,
                     vec![8, 8, 8, 8],
                 );
-                dns.header.set_ancount(1);
+                dns.header.inc_ancount();
 
                 let response = dns.response();
 
@@ -48,13 +51,13 @@ fn main() {
 
 #[derive(Debug)]
 struct Dns {
-    header: DnsHeader,
-    question: DnsQuestion,
+    header: Header,
+    question: Question,
     resource_records: Vec<ResourceRecord>,
 }
 
 impl Dns {
-    fn new(header: DnsHeader, question: DnsQuestion) -> Self {
+    fn new(header: Header, question: Question) -> Self {
         Self {
             header,
             question,
@@ -90,8 +93,8 @@ impl Dns {
     }
 }
 
-#[derive(Debug)]
-struct DnsHeader {
+#[derive(Debug, Default, Clone, Copy)]
+struct Header {
     id: u16,
     query_response: bool,
     opcode: u8,
@@ -107,31 +110,113 @@ struct DnsHeader {
     additional_count: u16,
 }
 
-impl DnsHeader {
-    fn new() -> Self {
+impl Header {
+    fn id(self, id: u16) -> Self {
+        Self { id, ..self }
+    }
+
+    fn query_response(self, query_response: bool) -> Self {
         Self {
-            id: 1234,
-            query_response: true,
-            opcode: 0,
-            authoritative_answer: false,
-            truncated_msg: false,
-            recursion_desired: false,
-            recursion_available: false,
-            reserved: 0,
-            response_code: 0,
-            question_count: 0,
-            answer_count: 0,
-            authority_count: 0,
-            additional_count: 0,
+            query_response,
+            ..self
         }
     }
 
-    fn set_qcount(&mut self, count: u16) {
-        self.question_count = count;
+    fn opcode(self, opcode: u8) -> Self {
+        Self { opcode, ..self }
     }
 
-    fn set_ancount(&mut self, count: u16) {
-        self.answer_count = count;
+    fn authoritative_answer(self, authoritative_answer: bool) -> Self {
+        Self {
+            authoritative_answer,
+            ..self
+        }
+    }
+
+    fn truncated_msg(self, truncated_msg: bool) -> Self {
+        Self {
+            truncated_msg,
+            ..self
+        }
+    }
+
+    fn recursion_desired(self, recursion_desired: bool) -> Self {
+        Self {
+            recursion_desired,
+            ..self
+        }
+    }
+
+    fn recursion_available(self, recursion_available: bool) -> Self {
+        Self {
+            recursion_available,
+            ..self
+        }
+    }
+
+    fn reserved(self, reserved: u8) -> Self {
+        Self { reserved, ..self }
+    }
+
+    fn response_code(self, response_code: u8) -> Self {
+        Self {
+            response_code,
+            ..self
+        }
+    }
+
+    fn question_count(self, question_count: u16) -> Self {
+        Self {
+            question_count,
+            ..self
+        }
+    }
+
+    fn answer_count(self, answer_count: u16) -> Self {
+        Self {
+            answer_count,
+            ..self
+        }
+    }
+
+    fn authority_count(self, authority_count: u16) -> Self {
+        Self {
+            authority_count,
+            ..self
+        }
+    }
+
+    fn additional_count(self, additional_count: u16) -> Self {
+        Self {
+            additional_count,
+            ..self
+        }
+    }
+
+    fn build(self) -> Header {
+        Self {
+            id: self.id,
+            query_response: self.query_response,
+            opcode: self.opcode,
+            authoritative_answer: self.authoritative_answer,
+            truncated_msg: self.truncated_msg,
+            recursion_desired: self.recursion_desired,
+            recursion_available: self.recursion_available,
+            reserved: self.reserved,
+            response_code: self.response_code,
+            question_count: self.question_count,
+            answer_count: self.answer_count,
+            authority_count: self.authority_count,
+            additional_count: self.additional_count,
+        }
+    }
+
+    fn inc_qcount(&mut self) {
+        self.question_count += 1;
+    }
+
+    fn inc_ancount(&mut self) {
+        self.answer_count += 1;
     }
 
     fn to_bytes(&self) -> [u8; 12] {
@@ -171,7 +256,7 @@ impl DnsHeader {
 }
 
 #[derive(Debug)]
-struct DnsQuestion {
+struct Question {
     name: String,
     qtype: QueryType,
     class: Class,
@@ -217,7 +302,7 @@ impl Class {
     }
 }
 
-impl DnsQuestion {
+impl Question {
     fn new(name: String, qtype: QueryType, class: Class) -> Self {
         Self { name, qtype, class }
     }
