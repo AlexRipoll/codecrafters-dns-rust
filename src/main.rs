@@ -4,11 +4,6 @@ fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    let header = DnsHeader::new();
-    let question = DnsQuestion::new("codecrafters.io".to_string(), QueryType::A, Class::IN);
-
-    let mut dns = Dns::new(header, question);
-
     // Uncomment this block to pass the first stage
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
@@ -18,7 +13,22 @@ fn main() {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
 
+                let header = DnsHeader::new();
+                let question =
+                    DnsQuestion::new("codecrafters.io".to_string(), QueryType::A, Class::IN);
+
+                let mut dns = Dns::new(header, question);
                 dns.header.set_qcount(1);
+
+                dns.add_resource_record(
+                    "codecrafters.io".to_string(),
+                    QueryType::A,
+                    Class::IN,
+                    60,
+                    4,
+                    vec![8, 8, 8, 8],
+                );
+                dns.header.set_ancount(1);
 
                 let response = dns.response();
 
@@ -40,11 +50,31 @@ fn main() {
 struct Dns {
     header: DnsHeader,
     question: DnsQuestion,
+    resource_records: Vec<ResourceRecord>,
 }
 
 impl Dns {
     fn new(header: DnsHeader, question: DnsQuestion) -> Self {
-        Self { header, question }
+        Self {
+            header,
+            question,
+            resource_records: Vec::new(),
+        }
+    }
+
+    fn add_resource_record(
+        &mut self,
+        name: String,
+        qtype: QueryType,
+        class: Class,
+        ttl: u32,
+        rdlength: u16,
+        rdata: Vec<u8>,
+    ) {
+        // TODO: check rdata length eq to rdlength
+        self.resource_records.push(ResourceRecord::new(
+            name, qtype, class, ttl, rdlength, rdata,
+        ));
     }
 
     fn response(&self) -> Vec<u8> {
@@ -52,6 +82,9 @@ impl Dns {
 
         response.extend_from_slice(&self.header.to_bytes());
         response.extend_from_slice(&self.question.to_bytes());
+        for rr in self.resource_records.iter() {
+            response.extend_from_slice(&rr.to_bytes());
+        }
 
         response
     }
@@ -215,7 +248,7 @@ impl DnsQuestion {
 }
 
 #[derive(Debug)]
-struct DnsAnswer {
+struct ResourceRecord {
     name: String,
     qtype: QueryType,
     class: Class,
@@ -224,7 +257,7 @@ struct DnsAnswer {
     rdata: Vec<u8>,
 }
 
-impl DnsAnswer {
+impl ResourceRecord {
     fn new(
         name: String,
         qtype: QueryType,
