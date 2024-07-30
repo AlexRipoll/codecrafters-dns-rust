@@ -30,13 +30,13 @@ fn main() {
                 let question_bytes = buf[12..].to_vec();
                 let question = Question::from_bytes(question_bytes);
 
-                let mut dns = Dns::new(header.build(), question);
+                let mut dns = Dns::new(header.build(), question.clone());
                 dns.header.inc_qcount();
 
                 dns.add_resource_record(
-                    "codecrafters.io".to_string(),
-                    QueryType::A,
-                    Class::IN,
+                    question.name,
+                    question.qtype,
+                    question.class,
                     60,
                     4,
                     vec![8, 8, 8, 8],
@@ -101,7 +101,7 @@ impl Dns {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Question {
     name: String,
     qtype: QueryType,
