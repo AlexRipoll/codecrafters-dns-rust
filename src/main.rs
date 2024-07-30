@@ -27,8 +27,8 @@ fn main() {
                     .response_code(if packet_header.opcode == 0 { 0 } else { 4 })
                     .build();
 
-                let question =
-                    Question::new("codecrafters.io".to_string(), QueryType::A, Class::IN);
+                let question_bytes = buf[12..].to_vec();
+                let question = Question::from_bytes(question_bytes);
 
                 let mut dns = Dns::new(header.build(), question);
                 dns.header.inc_qcount();
@@ -175,6 +175,21 @@ impl Question {
         bytes.push(class as u8);
 
         bytes
+    }
+
+    fn from_bytes(data: Vec<u8>) -> Question {
+        let mut idx = 0;
+        let mut labels = Vec::new();
+
+        while data[idx] != 0 {
+            let length = data[idx] as usize;
+            idx += 1;
+            let label = std::str::from_utf8(&data[idx..idx + length]).unwrap();
+            labels.push(label);
+            idx += length;
+        }
+
+        Question::new(labels.join("."), QueryType::A, Class::IN)
     }
 }
 
