@@ -142,7 +142,7 @@ impl Header {
         bytes
     }
 
-    pub fn from_bytes(data: [u8; 12]) -> Header {
+    pub fn from_bytes(data: &[u8]) -> Header {
         // Parse the ID
         let id = u16::from_be_bytes([data[0], data[1]]);
 

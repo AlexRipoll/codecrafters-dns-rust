@@ -1,4 +1,4 @@
-use std::net::UdpSocket;
+use std::{net::UdpSocket, usize};
 
 use header::Header;
 
@@ -15,33 +15,32 @@ fn main() {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
 
-                let mut header_data = [0u8; 12];
-                header_data.copy_from_slice(&buf[0..12]);
-                let packet_header = Header::from_bytes(header_data);
+                let packet = Packet::from_bytes(buf);
 
                 header = header
-                    .id(packet_header.id)
+                    .id(packet.header.id)
                     .query_response(true)
-                    .opcode(packet_header.opcode)
-                    .recursion_desired(packet_header.recursion_desired)
-                    .response_code(if packet_header.opcode == 0 { 0 } else { 4 })
+                    .opcode(packet.header.opcode)
+                    .recursion_desired(packet.header.recursion_desired)
+                    .response_code(if packet.header.opcode == 0 { 0 } else { 4 })
+                    .question_count(packet.header.question_count)
                     .build();
 
-                let question_bytes = buf[12..].to_vec();
-                let question = Question::from_bytes(question_bytes);
+                let mut dns = Dns::new(header.build());
+                dns.questions = packet.questions.clone();
 
-                let mut dns = Dns::new(header.build(), question.clone());
-                dns.header.inc_qcount();
-
-                dns.add_resource_record(
-                    question.name,
-                    question.qtype,
-                    question.class,
-                    60,
-                    4,
-                    vec![8, 8, 8, 8],
-                );
-                dns.header.inc_ancount();
+                for i in 0..packet.header.question_count {
+                    let question = packet.questions.get(i as usize).unwrap();
+                    dns.add_resource_record(
+                        question.name.clone(),
+                        question.qtype,
+                        question.class,
+                        60,
+                        4,
+                        vec![8, 8, 8, 8],
+                    );
+                    dns.header.inc_ancount();
+                }
 
                 let response = dns.response();
 
@@ -57,20 +56,24 @@ fn main() {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Dns {
     header: Header,
-    question: Question,
+    questions: Vec<Question>,
     resource_records: Vec<ResourceRecord>,
 }
 
 impl Dns {
-    fn new(header: Header, question: Question) -> Self {
+    fn new(header: Header) -> Self {
         Self {
             header,
-            question,
+            questions: Vec::new(),
             resource_records: Vec::new(),
         }
+    }
+
+    fn add_question(&mut self, name: String, qtype: QueryType, class: Class) {
+        self.questions.push(Question::new(name, qtype, class));
     }
 
     fn add_resource_record(
@@ -82,7 +85,6 @@ impl Dns {
         rdlength: u16,
         rdata: Vec<u8>,
     ) {
-        // TODO: check rdata length eq to rdlength
         self.resource_records.push(ResourceRecord::new(
             name, qtype, class, ttl, rdlength, rdata,
         ));
@@ -92,12 +94,49 @@ impl Dns {
         let mut response = Vec::new();
 
         response.extend_from_slice(&self.header.to_bytes());
-        response.extend_from_slice(&self.question.to_bytes());
+
+        for question in self.questions.iter() {
+            response.extend_from_slice(&question.to_bytes());
+        }
+
         for rr in self.resource_records.iter() {
             response.extend_from_slice(&rr.to_bytes());
         }
 
         response
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Packet {
+    header: Header,
+    questions: Vec<Question>,
+}
+
+impl Packet {
+    fn from_bytes(buf: [u8; 512]) -> Packet {
+        let header = Header::from_bytes(&buf[..12]);
+
+        let mut questions: Vec<Question> = Vec::new();
+
+        let mut idx = 12;
+
+        for _ in 0..header.question_count {
+            let mut end_of_q = idx;
+            while buf[end_of_q] != 0 {
+                end_of_q += 1;
+            }
+            // add 4 corressponding to the `QueryType` (2 bytes) and `Class` (2 bytes)
+            end_of_q += 4;
+
+            end_of_q += 1;
+
+            let question = Question::from_bytes(&buf, idx);
+            questions.push(question);
+            idx = end_of_q;
+        }
+
+        Packet { header, questions }
     }
 }
 
@@ -177,23 +216,38 @@ impl Question {
         bytes
     }
 
-    fn from_bytes(data: Vec<u8>) -> Question {
-        let mut idx = 0;
-        let mut labels = Vec::new();
+    fn labels_from_bytes(data: &[u8], start_idx: usize) -> (String, usize) {
+        let mut idx = start_idx;
+        let mut labels: Vec<String> = Vec::new();
 
         while data[idx] != 0 {
-            let length = data[idx] as usize;
-            idx += 1;
-            let label = std::str::from_utf8(&data[idx..idx + length]).unwrap();
-            labels.push(label);
-            idx += length;
+            if data[idx] & 0b11000000 == 0b11000000 {
+                let offset =
+                    (((data[idx] & 0b00111111) as u16) << 8 | data[idx + 1] as u16) as usize;
+                let (label, _) = Self::labels_from_bytes(&data, offset);
+                labels.push(label);
+                // increase the index by tw0 since the offset used 2 bytes
+                idx += 2;
+            } else {
+                let length = data[idx] as usize;
+                idx += 1;
+                let label = std::str::from_utf8(&data[idx..idx + length]).unwrap();
+                labels.push(label.to_string());
+                idx += length;
+            }
         }
 
-        Question::new(labels.join("."), QueryType::A, Class::IN)
+        (labels.join("."), idx)
+    }
+
+    fn from_bytes(data: &[u8], start_idx: usize) -> Question {
+        let (label, _) = Self::labels_from_bytes(data.clone(), start_idx);
+
+        Question::new(label, QueryType::A, Class::IN)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ResourceRecord {
     name: String,
     qtype: QueryType,
