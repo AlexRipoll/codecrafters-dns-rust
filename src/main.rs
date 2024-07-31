@@ -1,5 +1,6 @@
 use std::{net::UdpSocket, usize};
 
+use clap::{arg, Command};
 use header::Header;
 
 mod header;
@@ -8,6 +9,16 @@ fn main() {
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
 
+    let matches = Command::new("dns-rs")
+        .version("1.0")
+        .about("A simple Domain Name System server")
+        .arg(arg!(--resolver <VALUE>).required(true))
+        .get_matches();
+
+    println!(
+        "resolver: {:?}",
+        matches.get_one::<String>("resolver").expect("required")
+    );
     let mut header = Header::default();
 
     loop {
