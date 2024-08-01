@@ -1,4 +1,4 @@
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Header {
     pub id: u16,
     pub query_response: bool,
@@ -179,5 +179,70 @@ impl Header {
             authority_count,
             additional_count,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_header_to_bytes() {
+        let header = Header {
+            id: 1234,
+            query_response: true,
+            opcode: 2,
+            authoritative_answer: false,
+            truncated_msg: false,
+            recursion_desired: true,
+            recursion_available: true,
+            reserved: 0,
+            response_code: 0,
+            question_count: 1,
+            answer_count: 2,
+            authority_count: 3,
+            additional_count: 4,
+        };
+
+        let expected_bytes = [
+            0x04, 0xD2, // ID: 1234
+            0x91, 0x80, // Flags: 10010001 10000000
+            0x00, 0x01, // Question Count: 1
+            0x00, 0x02, // Answer Count: 2
+            0x00, 0x03, // Authority Count: 3
+            0x00, 0x04, // Additional Count: 4
+        ];
+
+        assert_eq!(header.to_bytes(), expected_bytes);
+    }
+
+    #[test]
+    fn test_header_from_bytes() {
+        let bytes = [
+            0x04, 0xD2, // ID: 1234
+            0x91, 0x80, // Flags: 10010001 10000000
+            0x00, 0x01, // Question Count: 1
+            0x00, 0x02, // Answer Count: 2
+            0x00, 0x03, // Authority Count: 3
+            0x00, 0x04, // Additional Count: 4
+        ];
+
+        let header = Header {
+            id: 1234,
+            query_response: true,
+            opcode: 2,
+            authoritative_answer: false,
+            truncated_msg: false,
+            recursion_desired: true,
+            recursion_available: true,
+            reserved: 0,
+            response_code: 0,
+            question_count: 1,
+            answer_count: 2,
+            authority_count: 3,
+            additional_count: 4,
+        };
+
+        assert_eq!(Header::from_bytes(&bytes), header);
     }
 }
