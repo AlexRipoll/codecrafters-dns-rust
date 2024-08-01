@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QType {
     A = 1,
     NS = 2,
@@ -41,12 +41,12 @@ impl QType {
             14 => QType::MINFO,
             15 => QType::MX,
             16 => QType::TXT,
-            _ => panic!("Unknown QueryType"),
+            _ => panic!("Unknown QType"),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     IN = 1,
     CS = 2,
@@ -67,5 +67,36 @@ impl Class {
             4 => Class::HS,
             _ => panic!("Unknown Class"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_query_type_to_u16() {
+        assert_eq!(QType::A.to_u16(), 1u16);
+        assert_eq!(QType::NS.to_u16(), 2u16);
+        assert_eq!(QType::CNAME.to_u16(), 5u16);
+    }
+
+    #[test]
+    fn test_query_type_from_u16() {
+        assert_eq!(QType::from_u16(1), QType::A);
+        assert_eq!(QType::from_u16(2), QType::NS);
+        assert_eq!(QType::from_u16(5), QType::CNAME);
+    }
+
+    #[test]
+    fn test_class_to_u16() {
+        assert_eq!(Class::IN.to_u16(), 1u16);
+        assert_eq!(Class::CS.to_u16(), 2u16);
+    }
+
+    #[test]
+    fn test_class_from_u16() {
+        assert_eq!(Class::from_u16(1), Class::IN);
+        assert_eq!(Class::from_u16(2), Class::CS);
     }
 }
