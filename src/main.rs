@@ -1,4 +1,7 @@
-use std::{net::UdpSocket, usize};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    usize,
+};
 
 use clap::{arg, Command};
 use header::Header;
@@ -15,10 +18,8 @@ fn main() {
         .arg(arg!(--resolver <VALUE>).required(true))
         .get_matches();
 
-    println!(
-        "resolver: {:?}",
-        matches.get_one::<String>("resolver").expect("required")
-    );
+    let resolver = matches.get_one::<String>("resolver").expect("required");
+
     let mut header = Header::default();
 
     loop {
@@ -26,34 +27,49 @@ fn main() {
             Ok((size, source)) => {
                 println!("Received {} bytes from {}", size, source);
 
-                let packet = Packet::from_bytes(buf);
+                println!("init {:?}", buf);
+                let mut packet = Packet::from_bytes(buf);
+                println!("-->Header {:#?}", packet.header);
 
-                header = header
-                    .id(packet.header.id)
-                    .query_response(true)
-                    .opcode(packet.header.opcode)
-                    .recursion_desired(packet.header.recursion_desired)
-                    .response_code(if packet.header.opcode == 0 { 0 } else { 4 })
-                    .question_count(packet.header.question_count)
-                    .build();
+                // header = header
+                //     .id(packet.header.id)
+                //     .query_response(true)
+                //     .opcode(packet.header.opcode)
+                //     .recursion_desired(packet.header.recursion_desired)
+                //     .response_code(if packet.header.opcode == 0 { 0 } else { 4 })
+                //     .question_count(packet.header.question_count)
+                //     .build();
+                // println!("-->Header {:#?}", header);
+
+                let forward_packets = packet.split();
 
                 let mut dns = Dns::new(header.build());
-                dns.questions = packet.questions.clone();
 
-                for i in 0..packet.header.question_count {
-                    let question = packet.questions.get(i as usize).unwrap();
-                    dns.add_resource_record(
-                        question.name.clone(),
-                        question.qtype,
-                        question.class,
-                        60,
-                        4,
-                        vec![8, 8, 8, 8],
-                    );
-                    dns.header.inc_ancount();
-                }
+                let resource_records = Dns::forward(&udp_socket, resolver, forward_packets);
 
-                let response = dns.response();
+                // TODO: check header counts
+
+                dns.questions = packet.questions;
+                dns.resource_records = resource_records;
+
+                let response = dns.merge();
+
+                // dns.questions = packet.questions.clone();
+                //
+                // for i in 0..packet.header.question_count {
+                //     let question = packet.questions.get(i as usize).unwrap();
+                //     dns.add_resource_record(
+                //         question.name.clone(),
+                //         question.qtype,
+                //         question.class,
+                //         60,
+                //         4,
+                //         vec![8, 8, 8, 8],
+                //     );
+                //     dns.header.inc_ancount();
+                // }
+                //
+                // let response = dns.response();
 
                 udp_socket
                     .send_to(&response, source)
@@ -101,7 +117,58 @@ impl Dns {
         ));
     }
 
-    fn response(&self) -> Vec<u8> {
+    fn forward(
+        udp_socket: &UdpSocket,
+        addr: &String,
+        packets: Vec<Vec<u8>>,
+    ) -> Vec<ResourceRecord> {
+        let mut responses: Vec<ResourceRecord> = Vec::new();
+
+        for packet in packets {
+            println!("--> Packet {:?}", packet);
+            udp_socket
+                .send_to(&packet, addr)
+                .expect("Error receiving data: {}");
+
+            let mut response_buf = [0u8; 512];
+            udp_socket
+                .recv_from(&mut response_buf)
+                .expect("Failed to receive response from upstream");
+
+            let rr = ResourceRecord::from_bytes(&response_buf[..]);
+
+            responses.push(rr);
+        }
+
+        responses
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Packet {
+    header: Header,
+    questions: Vec<Question>,
+}
+
+impl Packet {
+    fn split(&mut self) -> Vec<Vec<u8>> {
+        let mut packets: Vec<Vec<u8>> = Vec::new();
+
+        let header = self.header.question_count(47).build();
+
+        for question in &self.questions {
+            let mut packet: Vec<u8> = Vec::new();
+
+            packet.extend_from_slice(&header.to_bytes());
+            packet.extend_from_slice(&question.to_bytes());
+
+            packets.push(packet);
+        }
+
+        packets
+    }
+
+    fn merge(&self) -> Vec<u8> {
         let mut response = Vec::new();
 
         response.extend_from_slice(&self.header.to_bytes());
@@ -116,15 +183,7 @@ impl Dns {
 
         response
     }
-}
 
-#[derive(Debug, Clone)]
-struct Packet {
-    header: Header,
-    questions: Vec<Question>,
-}
-
-impl Packet {
     fn from_bytes(buf: [u8; 512]) -> Packet {
         let header = Header::from_bytes(&buf[..12]);
 
@@ -182,6 +241,28 @@ impl QueryType {
     fn to_u16(self) -> u16 {
         self as u16
     }
+
+    fn from_u16(value: u16) -> QueryType {
+        match value {
+            1 => QueryType::A,
+            2 => QueryType::NS,
+            3 => QueryType::MD,
+            4 => QueryType::MF,
+            5 => QueryType::CNAME,
+            6 => QueryType::SOA,
+            7 => QueryType::MB,
+            8 => QueryType::MG,
+            9 => QueryType::MR,
+            10 => QueryType::NULL,
+            11 => QueryType::WKS,
+            12 => QueryType::PTR,
+            13 => QueryType::HINFO,
+            14 => QueryType::MINFO,
+            15 => QueryType::MX,
+            16 => QueryType::TXT,
+            _ => panic!("Unknown QueryType"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -195,6 +276,16 @@ enum Class {
 impl Class {
     fn to_u16(self) -> u16 {
         self as u16
+    }
+
+    fn from_u16(value: u16) -> Class {
+        match value {
+            1 => Class::IN,
+            2 => Class::CS,
+            3 => Class::CH,
+            4 => Class::HS,
+            _ => panic!("Unknown Class"),
+        }
     }
 }
 
@@ -227,35 +318,35 @@ impl Question {
         bytes
     }
 
-    fn labels_from_bytes(data: &[u8], start_idx: usize) -> (String, usize) {
-        let mut idx = start_idx;
-        let mut labels: Vec<String> = Vec::new();
-
-        while data[idx] != 0 {
-            if data[idx] & 0b11000000 == 0b11000000 {
-                let offset =
-                    (((data[idx] & 0b00111111) as u16) << 8 | data[idx + 1] as u16) as usize;
-                let (label, _) = Self::labels_from_bytes(&data, offset);
-                labels.push(label);
-                // increase the index by tw0 since the offset used 2 bytes
-                idx += 2;
-            } else {
-                let length = data[idx] as usize;
-                idx += 1;
-                let label = std::str::from_utf8(&data[idx..idx + length]).unwrap();
-                labels.push(label.to_string());
-                idx += length;
-            }
-        }
-
-        (labels.join("."), idx)
-    }
-
     fn from_bytes(data: &[u8], start_idx: usize) -> Question {
-        let (label, _) = Self::labels_from_bytes(data.clone(), start_idx);
+        let (label, _) = labels_from_bytes(data.clone(), start_idx);
 
         Question::new(label, QueryType::A, Class::IN)
     }
+}
+
+fn labels_from_bytes(data: &[u8], start_pos: usize) -> (String, usize) {
+    let mut cursor = start_pos;
+    let mut labels: Vec<String> = Vec::new();
+
+    while data[cursor] != 0 {
+        if data[cursor] & 0b11000000 == 0b11000000 {
+            let offset =
+                (((data[cursor] & 0b00111111) as u16) << 8 | data[cursor + 1] as u16) as usize;
+            let (label, _) = labels_from_bytes(&data, offset);
+            labels.push(label);
+            // increase the index by tw0 since the offset used 2 bytes
+            cursor += 2;
+        } else {
+            let length = data[cursor] as usize;
+            cursor += 1;
+            let label = std::str::from_utf8(&data[cursor..cursor + length]).unwrap();
+            labels.push(label.to_string());
+            cursor += length;
+        }
+    }
+
+    (labels.join("."), cursor)
 }
 
 #[derive(Debug, Clone)]
@@ -322,5 +413,65 @@ impl ResourceRecord {
         bytes.extend_from_slice(&self.rdata);
 
         bytes
+    }
+
+    fn from_bytes(buf: &[u8]) -> ResourceRecord {
+        let header = Header::from_bytes(&buf[..12]);
+
+        println!("rr {:?}", buf);
+        let mut idx = 12;
+
+        for _ in 0..header.answer_count {
+            // Decode the name
+            let (name, pos) = labels_from_bytes(buf, idx);
+            // let mut name = String::new();
+            // while buf[idx] != 0 {
+            //     let len = buf[idx] as usize;
+            //     idx += 1;
+            //     name.push_str(std::str::from_utf8(&buf[idx..idx + len]).unwrap());
+            //     idx += len;
+            //     if buf[idx] != 0 {
+            //         name.push('.');
+            //     }
+            // }
+            // idx += 1; // Skip the null byte
+            println!("idx {:?}", idx);
+            println!("name {:?}", name);
+
+            idx = pos + 1; // Skip the null byte
+
+            // Decode `qtype` (2 bytes)
+            let qtype = QueryType::from_u16(u16::from_be_bytes([buf[idx], buf[idx + 1]]));
+            idx += 2;
+            println!("qtype {:?}", qtype);
+
+            // Decode `class` (2 bytes)
+            let class = Class::from_u16(u16::from_be_bytes([buf[idx], buf[idx + 1]]));
+            idx += 2;
+            println!("class {:?}", class);
+        }
+
+        // Decode `ttl` (4 bytes)
+        let ttl = u32::from_be_bytes([buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]]);
+        idx += 4;
+        println!("ttl {:?}", ttl);
+
+        // Decode `rdlength` (2 bytes)
+        let rdlength = u16::from_be_bytes([buf[idx], buf[idx + 1]]);
+        idx += 2;
+        println!("rdlength {:?}", rdlength);
+
+        // Decode `rdata` (rdlength bytes)
+        let rdata = buf[idx..idx + rdlength as usize].to_vec();
+        println!("rdata {:?}", rdata);
+
+        ResourceRecord {
+            name: "jlsadjfal".to_string(),
+            qtype: QueryType::A,
+            class: Class::IN,
+            ttl,
+            rdlength,
+            rdata,
+        }
     }
 }
