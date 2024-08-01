@@ -1,42 +1,51 @@
+use crate::{
+    header::{self, Header},
+    question::{self, Question},
+    resource_records::{self, Record},
+};
+
 #[derive(Debug, Clone)]
 pub struct Packet {
     pub header: Header,
     pub questions: Vec<Question>,
-    pub resource_records: Vec<ResourceRecord>,
+    pub records: Vec<Record>,
 }
 
 impl Packet {
-    pub fn split(&mut self) -> Vec<Vec<u8>> {
-        let mut packets: Vec<Vec<u8>> = Vec::new();
+    pub fn split(&mut self) -> Vec<Packet> {
+        let header = self.header.question_count(1).build();
 
-        let header = self.header.question_count(47).build();
-
-        for question in &self.questions {
-            let mut packet: Vec<u8> = Vec::new();
-
-            packet.extend_from_slice(&header.to_bytes());
-            packet.extend_from_slice(&question.to_bytes());
-
-            packets.push(packet);
-        }
-
-        packets
+        self.questions
+            .clone()
+            .into_iter()
+            .map(|question| Self {
+                header,
+                questions: vec![question],
+                records: vec![],
+            })
+            .collect()
     }
 
-    pub fn merge(&self) -> Vec<u8> {
-        let mut response = Vec::new();
+    pub fn merge(packets: Vec<Packet>) -> Packet {
+        let mut header = packets[0].header;
+        let header = header
+            .question_count(packets.len() as u16)
+            .answer_count(packets.len() as u16)
+            .build();
 
-        response.extend_from_slice(&self.header.to_bytes());
+        let mut questions: Vec<Question> = Vec::new();
+        let mut records: Vec<Record> = Vec::new();
 
-        for question in self.questions.iter() {
-            response.extend_from_slice(&question.to_bytes());
+        packets.into_iter().for_each(|packet| {
+            questions.extend(packet.questions);
+            records.extend(packet.records);
+        });
+
+        Packet {
+            header,
+            questions,
+            records,
         }
-
-        for rr in self.resource_records.iter() {
-            response.extend_from_slice(&rr.to_bytes());
-        }
-
-        response
     }
 
     pub fn from_bytes(buf: [u8; 512]) -> Packet {
@@ -64,7 +73,7 @@ impl Packet {
         Packet {
             header,
             questions,
-            resource_records: vec![],
+            records: vec![],
         }
     }
 }
